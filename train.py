@@ -14,6 +14,7 @@ import models
 import utils
 from test import eval_psnr
 from scheduler import GradualWarmupScheduler
+from adaptive_sampling import full_hr_collate, recovery_scores, sample_batch, reconstruction_loss
 
 
 def make_data_loader(spec, tag=''):
@@ -27,8 +28,11 @@ def make_data_loader(spec, tag=''):
     for k, v in dataset[0].items():
         log('  {}: shape={}'.format(k, tuple(v.shape)))
 
+    full_hr = spec['wrapper'].get('args', {}).get('return_full_hr', False)
+    workers = spec.get('num_workers', 8)
     loader = DataLoader(dataset, batch_size=spec['batch_size'],
-        shuffle=(tag == 'train'), num_workers=8, pin_memory=True,persistent_workers=True)
+        shuffle=(tag == 'train'), num_workers=workers, pin_memory=True,
+        persistent_workers=(workers > 0), collate_fn=full_hr_collate if full_hr else None)
     return loader
 
 
@@ -73,7 +77,6 @@ def prepare_training():
 def train(train_loader, model, optimizer, \
          epoch):
     model.train()
-    loss_fn = nn.L1Loss()
     train_loss = utils.Averager()
     metric_fn = utils.calc_psnr
 
@@ -82,8 +85,9 @@ def train(train_loader, model, optimizer, \
     inp_sub = torch.FloatTensor(t['sub']).view(1, -1, 1, 1).cuda()
     inp_div = torch.FloatTensor(t['div']).view(1, -1, 1, 1).cuda()
     t = data_norm['gt']
-    gt_sub = torch.FloatTensor(t['sub']).view(1, 1, -1).cuda()
-    gt_div = torch.FloatTensor(t['div']).view(1, 1, -1).cuda()
+    gt_sub = torch.FloatTensor(t['sub']).view(1, -1, 1, 1).cuda()
+    gt_div = torch.FloatTensor(t['div']).view(1, -1, 1, 1).cuda()
+    adaptive = config.get('adaptive_sampling', {})
     
     #num_dataset = 800 # DIV2K
     #iter_per_epoch = int(num_dataset / config.get('train_dataset')['batch_size'] \
@@ -92,13 +96,43 @@ def train(train_loader, model, optimizer, \
     pbar = tqdm(train_loader, leave=False, desc='train')
     for batch in pbar:
         for k, v in batch.items():
-            batch[k] = v.cuda(non_blocking=True)
+            batch[k] = ([image.cuda(non_blocking=True) for image in v]
+                        if isinstance(v, list) else v.cuda(non_blocking=True))
 
         inp = (batch['inp'] - inp_sub) / inp_div
-        pred = model(inp, batch['coord'], batch['cell'])
+        weight = None
+        if adaptive.get('enabled', False):
+            block_grid = tuple(adaptive.get('block_grid', [8, 8]))
+            warmup = epoch <= adaptive.get('warmup_epochs', 10)
+            uniform_fraction = adaptive.get('uniform_fraction', 0.5)
+            if warmup or uniform_fraction == 1:
+                scores = inp.new_zeros((inp.shape[0], *block_grid))
+            else:
+                preview_shape = tuple(adaptive.get('preview_size', [32, 32]))
+                coord = utils.make_coord(preview_shape, flatten=False).to(inp)
+                coord = coord.unsqueeze(0).expand(inp.shape[0], -1, -1, -1)
+                # Preserve target pixel footprint: the preview samples the same SR task.
+                # Do not cache gen_feat here: the training pass needs its autograd graph.
+                was_training = model.training
+                model.eval()
+                with torch.no_grad():
+                    preview = model(inp, coord, batch['cell'])
+                    scores = recovery_scores(preview, block_grid)
+                model.train(was_training)
+            selected = sample_batch(batch['gt'], scores,
+                sample_q=adaptive['sample_q'],
+                uniform_fraction=1.0 if warmup else uniform_fraction,
+                power=adaptive.get('power', 1.0))
+            batch.update(selected)
+            weight = batch['sample_weight']
+        elif isinstance(batch['gt'], list):
+            raise ValueError('return_full_hr requires adaptive_sampling.enabled.')
+
+        pred = model(inp, batch['coord'], batch['cell'], sample_weight=weight)
 
         gt = (batch['gt'] - gt_sub) / gt_div
-        loss = loss_fn(pred, gt)
+        loss = reconstruction_loss(pred, gt, weight,
+                                   mode=adaptive.get('loss_measure', 'uniform'))
         #psnr = metric_fn(pred, gt)
         
         # tensorboard

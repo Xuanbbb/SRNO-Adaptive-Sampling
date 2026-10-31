@@ -8,10 +8,7 @@ import math
 import torch
 import numpy as np
 from torch.optim import SGD
-from tensorboardX import SummaryWriter
 from Adam import Adam
-import cv2
-import matplotlib.pyplot as plt
 
 from torchvision import transforms
 from torchvision.transforms import InterpolationMode
@@ -19,6 +16,8 @@ import random
 import math
 
 def show_feature_map(feature_map,layer,name='rgb',rgb=False):
+    import cv2
+    import matplotlib.pyplot as plt
     feature_map = feature_map.squeeze(0)
     #if rgb: feature_map = feature_map.permute(1,2,0)*0.5+0.5
     feature_map = feature_map.cpu().numpy()
@@ -158,6 +157,7 @@ def ensure_path(path, remove=True):
 
 
 def set_save_path(save_path, remove=True):
+    from tensorboardX import SummaryWriter
     ensure_path(save_path, remove=remove)
     set_log_path(save_path)
     writer = SummaryWriter(os.path.join(save_path, 'tensorboard'))

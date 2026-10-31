@@ -34,11 +34,11 @@ class SRNO(nn.Module):
         self.feat = self.encoder(inp)
         return self.feat
         
-    def query_rgb(self, coord, cell):      
+    def query_rgb(self, coord, cell, sample_weight=None):
         feat = (self.feat)
         grid = 0
 
-        pos_lr = make_coord(feat.shape[-2:], flatten=False).cuda() \
+        pos_lr = make_coord(feat.shape[-2:], flatten=False).to(feat) \
             .permute(2, 0, 1) \
             .unsqueeze(0).expand(feat.shape[0], 2, *feat.shape[-2:])
 
@@ -87,8 +87,8 @@ class SRNO(nn.Module):
             rel_cell.unsqueeze(-1).unsqueeze(-1).repeat(1,1,coord.shape[1],coord.shape[2])],dim=1)
 
         x = self.conv00(grid)
-        x = self.conv0(x, 0)
-        x = self.conv1(x, 1)
+        x = self.conv0(x, 0, sample_weight=sample_weight)
+        x = self.conv1(x, 1, sample_weight=sample_weight)
 
         feat = x
         ret = self.fc2(F.gelu(self.fc1(feat)))
@@ -98,7 +98,7 @@ class SRNO(nn.Module):
                                 padding_mode='border', align_corners=False)
         return ret
 
-    def forward(self, inp, coord, cell):
+    def forward(self, inp, coord, cell, sample_weight=None):
         self.gen_feat(inp)
-        return self.query_rgb(coord, cell)
+        return self.query_rgb(coord, cell, sample_weight=sample_weight)
 

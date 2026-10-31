@@ -19,7 +19,7 @@ def resize_fn(img, size):
 class SRImplicitDownsampledFast(Dataset):
 
     def __init__(self, dataset, inp_size=None, scale_min=1, scale_max=None,
-                 augment=False):
+                 augment=False, return_full_hr=False):
         self.dataset = dataset
         self.inp_size = inp_size
         self.scale_min = scale_min
@@ -27,6 +27,7 @@ class SRImplicitDownsampledFast(Dataset):
             scale_max = scale_min
         self.scale_max = scale_max
         self.augment = augment
+        self.return_full_hr = return_full_hr
 
     def __len__(self):
         return len(self.dataset)
@@ -69,6 +70,13 @@ class SRImplicitDownsampledFast(Dataset):
 
             crop_lr = augment(crop_lr)
             crop_hr = augment(crop_hr)
+
+        if self.return_full_hr:
+            return {
+                'inp': crop_lr,
+                'cell': torch.tensor([2 / h_hr, 2 / w_hr], dtype=torch.float32),
+                'gt': crop_hr.contiguous(),
+            }
 
         hr_coord = make_coord([h_hr, w_hr], flatten=False)
         hr_rgb = crop_hr

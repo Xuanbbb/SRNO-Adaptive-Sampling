@@ -1,0 +1,7 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+save/
+data/*
+!data/link_data_folder_here

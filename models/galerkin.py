@@ -35,8 +35,8 @@ class simple_attn(nn.Module):
         self.vln = LayerNorm((self.heads, 1, self.headc))
 
         self.act = nn.GELU()
-    
-    def forward(self, x, name='0'):
+
+    def forward(self, x, name='0', sample_weight=None):
         B, C, H, W = x.shape
         bias = x
 
@@ -47,13 +47,22 @@ class simple_attn(nn.Module):
         k = self.kln(k)
         v = self.vln(v)
 
-        
-        v = torch.matmul(k.transpose(-2,-1), v) / (H*W)
+
+        if sample_weight is None:
+            v = torch.matmul(k.transpose(-2,-1), v) / (H*W)
+        else:
+            if sample_weight.shape != (B, 1, H, W):
+                raise ValueError('sample_weight must have shape Bx1xHxW.')
+            weight = sample_weight.reshape(B, 1, H*W, 1).to(v)
+            if not torch.isfinite(weight).all() or (weight <= 0).any():
+                raise ValueError('sample_weight must be finite and positive.')
+            weight = weight / weight.sum(dim=-2, keepdim=True)
+            v = torch.matmul(k.transpose(-2,-1), v * weight)
         v = torch.matmul(q, v)
         v = v.permute(0, 2, 1, 3).reshape(B, H, W, C)
 
         ret = v.permute(0, 3, 1, 2) + bias
         bias = self.o_proj2(self.act(self.o_proj1(ret))) + bias
-        
+
         return bias
-    
+

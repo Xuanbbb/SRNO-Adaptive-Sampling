@@ -1,5 +1,8 @@
 # Super-Resolution Neural Operator
 
+Local modification: see [ADAPTIVE_SAMPLING.md](ADAPTIVE_SAMPLING.md) for the
+fixed-budget adaptive training sampler, paired configs, and validation commands.
+
 This repository contains the official implementation for SRNO introduced in the following paper:
 
 [**Super-Resolution Neural Operator**](https://arxiv.org/abs/2303.02584) (CVPR 2023)
